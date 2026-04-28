@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import KnowledgeGraph from '@/components/KnowledgeGraph.vue'
 import { TYPE_CONFIG } from '@/types/knowledge'
-import type { KnowledgeFilter } from '@/types/knowledge'
+import type { KnowledgeFilter, KnowledgeItem } from '@/types/knowledge'
 
 const store = useKnowledgeStore()
 
@@ -32,6 +32,17 @@ const filteredItems = computed(() => {
   })
 })
 
+// ── 详情弹窗状态 ──────────────────────────────
+const selectedItem = ref<KnowledgeItem | null>(null)
+
+function openDetail(item: KnowledgeItem) {
+  selectedItem.value = item
+}
+
+function closeDetail() {
+  selectedItem.value = null
+}
+
 function formatDate(dateStr: string) {
   const d = new Date(dateStr)
   const now = new Date()
@@ -53,6 +64,7 @@ function topicIcon(topic: string) {
 
 <template>
   <div class="kv-root">
+    <!-- 标题行 -->
     <div class="kv-title-row">
       <div class="kv-title-left">
         <span class="kv-icon">💡</span>
@@ -72,10 +84,16 @@ function topicIcon(topic: string) {
       </button>
     </div>
 
+    <!-- 搜索栏（列表视图） -->
     <div v-if="!isGraphView" class="kv-search-bar glass-light">
       <div class="search-input-wrap">
         <span class="search-icon">🔍</span>
-        <input v-model="searchQuery" class="search-input" placeholder="搜索标题、摘要、标签…" type="text" />
+        <input
+          v-model="searchQuery"
+          class="search-input"
+          placeholder="搜索标题、摘要、标签…"
+          type="text"
+        />
         <button v-if="searchQuery" class="search-clear" @click="searchQuery = ''">×</button>
       </div>
       <div class="filter-row">
@@ -92,6 +110,7 @@ function topicIcon(topic: string) {
       </div>
     </div>
 
+    <!-- 主体 -->
     <div class="kv-body">
       <div v-if="!isGraphView" class="kv-list">
         <div class="result-info" v-if="searchQuery || activeFilter !== 'all'">
@@ -107,6 +126,7 @@ function topicIcon(topic: string) {
             class="k-card glass-light"
             :class="{ 'has-conflict': item.hasConflict }"
             :style="{ animationDelay: `${idx * 35}ms` }"
+            @click="openDetail(item)"
           >
             <div class="card-meta">
               <span
@@ -127,7 +147,7 @@ function topicIcon(topic: string) {
             <div v-if="item.hasConflict" class="conflict-bar">
               <span class="cb-icon">⚠</span>
               <span class="cb-text">{{ item.conflictDesc?.slice(0, 60) }}…</span>
-              <button class="cb-action">查看详情</button>
+              <button class="cb-action" @click.stop>查看详情</button>
             </div>
           </article>
         </div>
@@ -140,19 +160,43 @@ function topicIcon(topic: string) {
         </div>
       </div>
 
+      <!-- 图谱视图 -->
       <div v-else class="kv-graph">
         <div class="graph-hint">
-          <span>💡</span> 拖拽节点调整布局 · 滚轮缩放 · 点击 <span class="hint-conflict">红色节点</span> 查看冲突详情
+          <span>💡</span> 拖拽节点调整布局 · 滚轮缩放 · 点击
+          <span class="hint-conflict">红色节点</span> 查看冲突详情
         </div>
         <div class="graph-canvas-wrap">
           <KnowledgeGraph :nodes="store.graphNodes" :edges="store.graphEdges" />
         </div>
       </div>
     </div>
+
+    <!-- ── 知识详情弹窗 ────────────────────────── -->
+    <Teleport to="body">
+      <Transition name="modal-fade">
+        <div v-if="selectedItem" class="detail-overlay" @click.self="closeDetail">
+          <div class="detail-modal glass">
+            <button class="detail-close" @click="closeDetail">×</button>
+            <div class="detail-type" :style="{ color: TYPE_CONFIG[selectedItem.type]?.color }">
+              {{ TYPE_CONFIG[selectedItem.type]?.label }}
+            </div>
+            <h2 class="detail-title">{{ selectedItem.title }}</h2>
+            <p class="detail-summary">{{ selectedItem.summary }}</p>
+            <div class="detail-tags">
+              <span v-for="tag in selectedItem.tags" :key="tag" class="tag-pill">#{{ tag }}</span>
+            </div>
+            <p class="detail-date">更新于 {{ formatDate(selectedItem.updatedAt) }}</p>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
+/* ── 原有样式保持不变（你的 KnowledgeView 之前的 <style scoped> 内容）── */
+/* ... 这里保留你原有的所有样式 ... */
 .kv-root {
   display: flex;
   flex-direction: column;
@@ -302,4 +346,92 @@ function topicIcon(topic: string) {
 .graph-hint { flex-shrink: 0; font-size: 12.5px; color: #8B7E74; background: rgba(255,255,255,0.45); border: 1px solid rgba(255,255,255,0.65); border-radius: 10px; padding: 8px 16px; backdrop-filter: blur(12px); display: flex; align-items: center; gap: 8px; }
 .hint-conflict { color: #D04040; font-weight: 600; }
 .graph-canvas-wrap { flex: 1; min-height: 0; border-radius: 18px; overflow: hidden; }
+
+/* ── 详情弹窗 ─────────────────────────────────── */
+.detail-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+}
+.detail-modal {
+  width: 500px;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 32px;
+  border-radius: 24px;
+  position: relative;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+}
+.detail-close {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  background: none;
+  border: none;
+  font-size: 26px;
+  cursor: pointer;
+  color: #8B7E74;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+.detail-close:hover {
+  background: rgba(139,126,116,0.08);
+}
+.detail-type {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.detail-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #3D3631;
+  margin: 0 0 14px;
+  line-height: 1.3;
+}
+.detail-summary {
+  font-size: 14.5px;
+  color: #5A514C;
+  line-height: 1.8;
+  margin: 0 0 18px;
+}
+.detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.detail-date {
+  font-size: 12px;
+  color: #B5A99F;
+}
+
+/* 弹窗过渡动画 */
+.modal-fade-enter-active,
+.modal-fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+  opacity: 0;
+}
+.modal-fade-enter-active .detail-modal {
+  animation: modal-pop 0.25s ease;
+}
+@keyframes modal-pop {
+  from { transform: scale(0.92); }
+  to { transform: scale(1); }
+}
 </style>
