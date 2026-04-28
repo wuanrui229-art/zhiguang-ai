@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { ChatMessage, TaskCardData } from '@/types/chat'
 import { useTaskStore } from '@/stores/task'
+import { useKnowledgeStore } from '@/stores/knowledge'
 
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([])
@@ -98,7 +99,10 @@ export const useChatStore = defineStore('chat', () => {
         ])
       }
     } else if (text.startsWith('📎')) {
+      // ── 文件上传：Mock 上传 + 真实写入知识库 ──
       const fileName = text.replace('📎 ', '')
+      
+      // 1. 生成 AI 回复消息
       const aiMsg: ChatMessage = {
         id: String(++msgId),
         role: 'assistant',
@@ -107,6 +111,17 @@ export const useChatStore = defineStore('chat', () => {
         isTyping: true
       }
       messages.value.push(aiMsg)
+
+      // 2. 写入知识库 Store（新增联动）
+      const knowledgeStore = useKnowledgeStore()
+      knowledgeStore.addItem({
+        title: fileName,
+        type: 'document',
+        topic: '上传文件',
+        summary: `用户上传的《${fileName}》，已通过MarkItDown解析并提取核心概念。`,
+        tags: ['上传文件', 'MarkItDown'],
+        hasConflict: false
+      })
     } else {
       const apiReply = await callKimiAPI(text)
 

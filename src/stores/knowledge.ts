@@ -61,5 +61,21 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     return edges
   })
 
-  return { items, stats, graphNodes, graphEdges }
+  function addItem(item: {
+    title: string
+    type: 'concept' | 'note' | 'document'
+    topic: string
+    summary: string
+    tags: string[]
+    hasConflict: boolean
+  }) {
+    const newItem: KnowledgeItem = {
+      id: String(Date.now()),
+      ...item,
+      updatedAt: new Date().toISOString(),
+    }
+    items.value.unshift(newItem)
+  }
+
+  return { items, stats, graphNodes, graphEdges, addItem }
 })
