@@ -17,12 +17,40 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  // ── 调用 Kimi API ──────────────────────────────────────
+  // ── 在知识库中检索 ──────────────────────────────────
+  function searchKnowledge(query: string): string {
+    const knowledgeStore = useKnowledgeStore()
+    const q = query.toLowerCase()
+    const matched = knowledgeStore.items.filter(item =>
+      item.title.toLowerCase().includes(q) ||
+      item.summary.toLowerCase().includes(q) ||
+      item.tags.some(tag => tag.toLowerCase().includes(q))
+    )
+
+    if (matched.length === 0) return ''
+
+    // 取前3条最相关的
+    const snippets = matched.slice(0, 3).map(item =>
+      `【${item.title}】（类型：${item.type}，标签：${item.tags.join('、')}）\n${item.summary}`
+    )
+    return snippets.join('\n\n')
+  }
+
+  // ── 调用 Kimi API（支持知识库上下文）───────────────
   async function callKimiAPI(userMessage: string): Promise<string | null> {
     const apiKey = import.meta.env.VITE_KIMI_API_KEY
     if (!apiKey) {
       console.warn('API Key 未配置，使用 Mock 回复')
       return null
+    }
+
+    // 检索知识库
+    const knowledgeContext = searchKnowledge(userMessage)
+
+    // 构建系统提示词
+    let systemPrompt = '你是织光AI，一个服务于大学生的校园知识助手。回答简洁亲切，用中文，不超过200字。'
+    if (knowledgeContext) {
+      systemPrompt += `\n\n以下是从用户个人知识库中检索到的相关内容，请优先基于这些内容回答问题，并在回复中提及信息来源：\n\n${knowledgeContext}`
     }
 
     try {
@@ -35,14 +63,11 @@ export const useChatStore = defineStore('chat', () => {
         body: JSON.stringify({
           model: 'moonshot-v1-8k',
           messages: [
-            {
-              role: 'system',
-              content: '你是织光AI，一个深度融合腾讯生态（QQ群、腾讯文档）的校园知识助手。你帮助大学生管理DDL、整理知识库、检测协作冲突。回答简洁亲切，用中文，不超过150字。'
-            },
+            { role: 'system', content: systemPrompt },
             { role: 'user', content: userMessage }
           ],
           temperature: 0.7,
-          max_tokens: 300
+          max_tokens: 500
         })
       })
 
@@ -55,7 +80,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  // ── 发送消息（API 优先，失败降级 Mock）─────────────────
+  // ── 发送消息 ───────────────────────────────────────
   async function sendMessage(text: string) {
     addMessage({ role: 'user', content: text })
     isAiReplying.value = true
@@ -75,7 +100,7 @@ export const useChatStore = defineStore('chat', () => {
       const aiMsg: ChatMessage = {
         id: String(++msgId),
         role: 'assistant',
-        content: '收到！我检测到这是一条来自QQ群的任务消息。已自动提取DDL（下周三），并拆解为3个子任务。你可以前往"任务"看板管理进度。',
+        content: '收到！我检测到这是一条来自QQ群的任务消息。已自动提取截止时间，并拆解为3个子任务。你可以前往任务看板管理进度。',
         timestamp: Date.now(),
         isTyping: true,
         taskCard
@@ -99,27 +124,23 @@ export const useChatStore = defineStore('chat', () => {
         ])
       }
     } else if (text.startsWith('📎')) {
-      // ── 文件上传：Mock 上传 + 真实写入知识库 ──
       const fileName = text.replace('📎 ', '')
-      
-      // 1. 生成 AI 回复消息
       const aiMsg: ChatMessage = {
         id: String(++msgId),
         role: 'assistant',
-        content: `已收到《${fileName}》，正在使用MarkItDown引擎解析文档结构，并提取核心概念存入你的知识库。`,
+        content: `已收到《${fileName}》，正在使用文档解析引擎解析文档结构，并提取核心概念存入你的知识库。`,
         timestamp: Date.now(),
         isTyping: true
       }
       messages.value.push(aiMsg)
 
-      // 2. 写入知识库 Store（新增联动）
       const knowledgeStore = useKnowledgeStore()
       knowledgeStore.addItem({
         title: fileName,
         type: 'document',
         topic: '上传文件',
-        summary: `用户上传的《${fileName}》，已通过MarkItDown解析并提取核心概念。`,
-        tags: ['上传文件', 'MarkItDown'],
+        summary: `用户上传的《${fileName}》，已通过文档解析并提取核心概念。`,
+        tags: ['上传文件', '文档解析'],
         hasConflict: false
       })
     } else {
@@ -135,10 +156,18 @@ export const useChatStore = defineStore('chat', () => {
         }
         messages.value.push(aiMsg)
       } else {
+        // 降级 Mock：也尝试检索知识库
+        const knowledgeContext = searchKnowledge(text)
+        let mockReply = '好的，我已理解你的问题。'
+        if (knowledgeContext) {
+          mockReply += '根据你的知识库，我找到了以下相关内容：\n\n' + knowledgeContext.slice(0, 300) + '\n\n你可以切换到知识库页面查看详情。'
+        } else {
+          mockReply += '这是一个示例回复——实际使用时，我会检索你的笔记和课件，给出有据可依的回答。'
+        }
         const aiMsg: ChatMessage = {
           id: String(++msgId),
           role: 'assistant',
-          content: '好的，我已理解你的问题。这是一个基于你个人知识库的回答示例——实际使用时，我会先检索你的所有笔记和课件，再给出有据可依的回复。',
+          content: mockReply,
           timestamp: Date.now(),
           isTyping: true
         }
@@ -162,7 +191,7 @@ export const useChatStore = defineStore('chat', () => {
     const conflictMsg: ChatMessage = {
       id: String(++msgId),
       role: 'assistant',
-      content: '⚠️ 检测到你的小组成员【张同学】3分钟前更新了腾讯文档「路由模拟实验报告」中「实验数据对比」段落，与你昨天提交的版本存在2处数值冲突。\n\n**冲突点1**：RIP收敛时间（你：30s / 对方：45s）\n**冲突点2**：OSPF区域数量（你：3个 / 对方：5个）\n\n请确认以哪个版本为准，或直接跳转腾讯文档在线协商。',
+      content: '⚠️ 检测到你的小组成员3分钟前更新了腾讯文档「路由模拟实验报告」中「实验数据对比」段落，与你昨天提交的版本存在2处数值冲突。\n\n**冲突点1**：RIP收敛时间不一致\n**冲突点2**：OSPF区域数量不一致\n\n请确认以哪个版本为准，或直接跳转腾讯文档在线协商。',
       timestamp: Date.now(),
       isTyping: true,
       taskCard: undefined
